@@ -3,13 +3,12 @@
 module Fractal
 ( 
     fractal
-,   with
 ,   FractalOptions (..)
+,   mandelbrot
+,   julia
 )
 where
 
-
-import Control.Applicative
 import Codec.Picture
 import GHC.Word
 import Debug.Trace
@@ -18,31 +17,31 @@ import Data.Complex
 import Data.Maybe (fromMaybe)
 import Data.List (find)
 import Data.Default
-import Control.Monad.Reader
 
 data FractalOptions = FractalOptions 
     { fractWidth :: Int
     , fractHeight :: Int
-    , fractZoom :: Float
-    , fractCenterX :: Float
-    , fractCenterY :: Float
+    , fractZoom :: Double
+    , fractCenter :: Complex Double
     , fractMaxIter :: Int
-    , fractBailout :: Float
-    , fractFormula :: Complex Float -> Complex Float -> Complex Float
+    , fractBailout :: Complex Double -> Bool
+    , fractFormula :: Complex Double -> Complex Double -> Complex Double
+    , fractConstant :: Complex Double -> Complex Double
     , fractInsideCol :: PixelRGB8
     , fractOutsideCol :: Int -> PixelRGB8
-} -- deriving (Show, Eq, Read)
+    }
 
-instance Default FractalOptions where
-    def = FractalOptions 
+
+defaultOptions :: FractalOptions 
+defaultOptions = FractalOptions 
         { fractWidth = 200
         , fractHeight = 200
         , fractZoom = 100
-        , fractCenterX = 0
-        , fractCenterY = 0
-        , fractMaxIter = 10
-        , fractBailout = 4.0
-        , fractFormula = \ c z -> z ** 2 + c
+        , fractCenter = 0 :+ 0
+        , fractMaxIter = 40
+        , fractBailout = \ z -> magnitude z > 4.0
+        , fractFormula = const
+        , fractConstant = id
         , fractInsideCol = PixelRGB8 0 0 0
         , fractOutsideCol = \ n -> let r = fromIntegral $ (n * 3) `rem` 256
                                        g = fromIntegral $ (100 + n * 7) `rem` 256
@@ -50,33 +49,39 @@ instance Default FractalOptions where
                                    in PixelRGB8 r g b
         }
 
-with :: Default a => a
-with = def
+instance Default FractalOptions where
+    def = mandelbrot
+
+mandelbrot :: FractalOptions
+mandelbrot = defaultOptions { fractFormula = \c z -> z ** 2 + c }
+
+
+julia :: Complex Double -> FractalOptions
+julia c = mandelbrot { fractConstant = const c }
+
 
 fractal :: FractalOptions -> Int -> Int -> PixelRGB8
 fractal opts x y =
         let 
             (w, h)   = (fractWidth opts, fractHeight opts)
-            (x0, y0) = (fractCenterX opts, fractCenterY opts)
+            (x0 :+ y0) = (fractCenter opts)
             zoom     = fractZoom opts
             f        = fractFormula opts
             x'       = x0 + (fromIntegral x - fromIntegral w / 2) / zoom
             y'       = y0 + (fromIntegral y - fromIntegral h / 2) / zoom
-            c        = x' :+ y'
+            z        = (x' :+ y')
+            c        = fractConstant opts z
             color Nothing  = fractInsideCol opts 
             color (Just numIters) = fractOutsideCol opts numIters
         in 
-            color $ doIter opts (f c) c
+            color $ doIter opts (f c) z
 
 
-doIter :: FractalOptions -> (Complex Float -> Complex Float) -> Complex Float -> Maybe Int
+doIter :: FractalOptions -> (Complex Double -> Complex Double) -> Complex Double -> Maybe Int
 doIter opts f start = countIters . zip [0..] . take maxIter $ iterate f start
-    where outsideMandel z = magnitude z > bailout
-          countIters vs = fst <$> find (\v -> outsideMandel (snd v)) vs
+    where countIters = fmap fst . find (fractBailout opts . snd)
           maxIter = fractMaxIter opts
           bailout = fractBailout opts
-
-
 
 
 
